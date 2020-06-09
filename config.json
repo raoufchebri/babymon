@@ -1,0 +1,14 @@
+{
+    "webcam": 0,
+    "eye_aspect_ratio_thresh": 0.3,
+    "open_thresh_seconds" : 48,
+    "closed_thresh_seconds" : 48,
+    "shape_predictor": "./models/shape_predictor_68_face_landmarks.dat",
+	"aws_access_key_id": "AKIAT3Q6AIU6ZQAWJCLZ",
+	"aws_secret_access_key": "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",
+    "s3_bucket": "babymon",
+    "twilio_sid": "AC1e4d23b972f4b30f82bd5302be4de024",
+	"twilio_auth": "89dafe92015022c87dd898f76f49d623",
+	"twilio_to": "+41772277080",
+	"twilio_from": "+12028582316"
+}
