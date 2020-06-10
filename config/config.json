@@ -1,0 +1,15 @@
+{
+    "video": false,
+    "eye_aspect_ratio_thresh": 0.3,
+    "open_thresh_seconds" : 10,
+    "closed_thresh_seconds" : 30,
+    "alert_timer_minutes": 5,
+    "shape_predictor": "LANDMARK_DETECTOR_LOCATION",
+	"aws_access_key_id": "AWS_ACCESS_KEY",
+	"aws_secret_access_key": "AWS_SECRET_ACCESS_KEY",
+    "s3_bucket": "S3_BUCKET",
+    "twilio_sid": "TWILIO_SID",
+	"twilio_auth": "TWILIO_AUTH",
+	"twilio_to": "TWILIO_TO_NUMBER",
+	"twilio_from": "TWILIO_FROM_NUMBER"
+}

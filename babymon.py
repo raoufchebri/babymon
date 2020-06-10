@@ -1,26 +1,30 @@
+# USAGE
+# python babymon.py --config config/config.json
+
 # import the necessary packages
+import cv2
+import dlib
+import numpy as np
 from scipy.spatial import distance as dist
 from imutils.video import VideoStream
 from imutils import face_utils
 from imutils.io import TempFile
-from threading import Thread
-import numpy as np
-import playsound
-import argparse
 import imutils
+import argparse
 import time
-import dlib
-import cv2
 from config import Config
 from twilionotifier import TwilioNotifier
-from datetime import datetime, timedelta
-from datetime import date
+from datetime import datetime, timedelta, date
+import sys
+import signal
 
+# function to handle keyboard interrupt
+def signal_handler(sig, frame):
+	print("[INFO] You pressed `ctrl + c`! Closing mail detector" \
+		" application...")
+	sys.exit(0)
 
-def send_alert():
-    pass
-
-
+# function to calculate the eye aspect ratio
 def eye_aspect_ratio(eye):
 	# compute the euclidean distances between the two sets of
 	# vertical eye landmarks (x, y)-coordinates
@@ -34,30 +38,31 @@ def eye_aspect_ratio(eye):
 	# return the eye aspect ratio
 	return ear
 
+def send_alert(msg: str, img):
+    temp_file = TempFile(ext=".jpg")
+    cv2.imwrite(temp_file.path, img)
+    tn.send(msg, temp_file)
+
 
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
 ap.add_argument("-c", "--config", required=True,
                 help="path to the input configurtion file")
 args = vars(ap.parse_args())
+# construct the config object and twilio notifier
 config = Config(args["config"])
 tn = TwilioNotifier(config)
 
-# define two constants, one for the eye aspect ratio to indicate
-# blink and then a second constant for the number of consecutive
-# frames the eye must be below the threshold for to set off the
-# alarm
+# define four constants, one for the eye aspect ratio to indicate
+# blink, a second and third constants to define baby sleeping and
+# baby awake. The fourth constant is time between two alerts
 EYE_AR_THRESH = config["eye_aspect_ratio_thresh"]
-OPEN_THRESH = config["open_thresh_seconds"]
-CLOSED_THRESH = config["closed_thresh_seconds"]
-# initialize the frame counter as well as a boolean used to
-# indicate if the alarm is going off
-EYES_OPEN_COUNTER = 0
-EYES_CLOSED_COUNTER = 0
-ALERT_ON = False
+OPEN_THRESH_SECONDS = config["open_thresh_seconds"]
+CLOSED_THRESH_SECONDS = config["closed_thresh_seconds"]
+ALERT_TIMER_MINUTES = config["alert_timer_minutes"]
 
-SKIP_FRAME = 5
-COUNT_FRAMES = 0
+# boolean constant to display frames
+VIDEO_ON = config["video"]
 
 # initialize dlib's face detector (HOG-based) and then create
 # the facial landmark predictor
@@ -72,21 +77,26 @@ predictor = dlib.shape_predictor(config["shape_predictor"])
 
 # start the video stream thread
 print("[INFO] starting video stream thread...")
-vs = VideoStream(src=config["webcam"]).start()
+vs = VideoStream(src=0).start()
 time.sleep(1.0)
-# loop over frames from the video stream
 
-startTime = None
-endTime = None
-lastSentTime = datetime.now() - timedelta(minutes=5)
+# signal trap to handle keyboard interrupt
+signal.signal(signal.SIGINT, signal_handler)
+print("[INFO] Press `ctrl + c` to exit, or 'q' to quit if you have" \
+	" the display option on...")
+
+# initilize previous alert sent time to few minutes ago
+prev_alert_sent_time = datetime.now() - timedelta(minutes=ALERT_TIMER_MINUTES)
+eyes_open_time = None
+eyes_closed_time = None
+is_sleeping = True
 
 while True:
+    
     # read frame and convert image to grayscale
-    COUNT_FRAMES += 1
-    if COUNT_FRAMES % SKIP_FRAME != 0:
-        continue
     frame = vs.read()
     frame = imutils.resize(frame, width=450)
+    copy_frame = frame.copy()
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
     # detect face using dlib
@@ -108,56 +118,72 @@ while True:
         # find convex hull of left and right eyes and draw contours
         leftEyeHull = cv2.convexHull(leftEye)
         rightEyeHull = cv2.convexHull(rightEye)
-        cv2.drawContours(frame, [leftEyeHull], -1, (0, 255,0), 1)
-        cv2.drawContours(frame, [rightEyeHull], -1, (0, 255, 0), 1)
+        cv2.drawContours(copy_frame, [leftEyeHull], -1, (0, 255,0), 1)
+        cv2.drawContours(copy_frame, [rightEyeHull], -1, (0, 255, 0), 1)
 
-        # eyes open        
-        if ear >= EYE_AR_THRESH:
-            if not startTime:
-                startTime = datetime.now()
-            EYES_CLOSED_COUNTER = 0
-            EYES_OPEN_COUNTER += 1
-            # if the eyes were closed for a sufficient number of
-			# then sound the alarm
-            if EYES_OPEN_COUNTER >= OPEN_THRESH:
-                timeDiff = (datetime.now() - startTime).seconds
-                if not ALERT_ON:
-                    ALERT_ON = True
-                    # record temp video
-                    tempVideo = TempFile(ext=".mp4")
-                    print(tempVideo.path)
-                    writer = cv2.VideoWriter(tempVideo.path, 0x21, 30, (300,300), True)                                
+        if ear >= EYE_AR_THRESH: # eyes open
+                
+            if not eyes_open_time:
+                eyes_open_time = datetime.now()
+            
+            # calculate time to consider baby awake
+            open_tresh = eyes_open_time + timedelta(seconds=OPEN_THRESH_SECONDS)
+            
+            if open_tresh <= datetime.now():
+                
+                eyes_closed_time = None
+                
+                # calculate next alert time
+                next_alert_time = prev_alert_sent_time + timedelta(minutes=ALERT_TIMER_MINUTES)
 
-                elif ALERT_ON and timeDiff >= 10 and lastSentTime <= datetime.now() - timedelta(minutes=5):
-                    writer.release()
-                    writer = None
-                    msg = "Baby is awake"
-                    print("sending message to parent")
-                    tn.send(msg, tempVideo)
-                    lastSentTime = datetime.now()
-                cv2.putText(frame, "BABY IS AWAKE!", (10, 30),
+                if next_alert_time <= datetime.now():
+                    is_sleeping = False
+                    eyes_open_time = None
+                    
+                    # send alert
+                    dateAwake = date.today().strftime("%A, %B %d %Y")
+                    msg = "Message from the baby on {} at {}: I'm awake!".format(dateAwake, datetime.now().strftime("%I:%M%p"))
+                    send_alert(msg, frame)
+
+                    prev_alert_sent_time = next_alert_time
+                    
+                    print("[INFO] alert sent: {}". format(msg))
+                
+                cv2.putText(copy_frame, "BABY IS AWAKE!", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
-        # eyes closed
-        else:
-            EYES_CLOSED_COUNTER += 1
-            if EYES_CLOSED_COUNTER >= CLOSED_THRESH:
-                EYES_OPEN_COUNTER = 0
-                ALERT_ON = False
-                cv2.putText(frame, "Zzzzzzz!", (10, 30),
+        
+        else: #eyes closed
+            if not eyes_closed_time:
+                eyes_closed_time = datetime.now()
+
+            # calculate time to consider baby slleepign
+            closed_tresh = eyes_closed_time  + timedelta(seconds=CLOSED_THRESH_SECONDS)
+
+            if closed_tresh <= datetime.now() and not is_sleeping:
+                is_sleeping = True
+                eyes_open_time = None
+                prev_alert_sent_time = datetime.now() - timedelta(minutes=5)
+                
+                msg = "Message from the baby on {} at {}: Zzzzzzzzzzz (do not disturb)".format(dateAwake, datetime.now().strftime("%I:%M%p"))
+                send_alert(msg, frame)
+
+                print("[INFO] alert sent: {}". format(msg))
+                
+                cv2.putText(copy_frame, "Zzzzzzz!", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2)
-            else:
-                cv2.putText(frame, "BABY IS AWAKE!", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
 
         # display eye aspect ratio
-        cv2.putText(frame, "EAR = {:.2f}".format(ear), (300,30), 
+        cv2.putText(copy_frame, "EAR = {:.2f}".format(ear), (300,30), 
             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
 
-    cv2.imshow('frame', frame)
-    key = cv2.waitKey(1) & 0xFF
+    if config["video"]:
+        cv2.imshow('babymon', copy_frame)
+        key = cv2.waitKey(1) & 0xFF
 
-    if key == ord('q'):
-        break
+        if key == ord('q'):
+            break
+
+    time.sleep(1.0)
 
 cv2.destroyAllWindows()
 vs.stop()
