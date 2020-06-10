@@ -77,6 +77,8 @@ predictor = dlib.shape_predictor(config["shape_predictor"])
 
 # start the video stream thread
 print("[INFO] starting video stream thread...")
+# uncomment the below if you use Rasberry Pi
+# vs = VideoStream(usePiCamera=True).start()
 vs = VideoStream(src=0).start()
 time.sleep(1.0)
 
