@@ -12,8 +12,8 @@ from imutils.io import TempFile
 import imutils
 import argparse
 import time
-from config import Config
-from twilionotifier import TwilioNotifier
+from utils.config import Config
+from notifications.twilionotifier import TwilioNotifier
 from datetime import datetime, timedelta, date
 import sys
 import signal

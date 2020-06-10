@@ -30,7 +30,6 @@ class TwilioNotifier:
         client = Client(self.conf["twilio_sid"],
 			self.conf["twilio_auth"])
 
-        print("sending message")
         client.messages.create(to=self.conf["twilio_to"], 
 			from_=self.conf["twilio_from"], body=msg
             , media_url=url
